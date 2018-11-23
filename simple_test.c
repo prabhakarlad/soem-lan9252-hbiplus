@@ -192,37 +192,34 @@ static void simpletest(char *ifname)
 		}
 		printf("Processdata cycle %llu, WKC %d , O:", loop, wkc);
 #else
-		j++;
-		--j;
-		printf("Processdata cycle %llu, WKC %d , O:\n", loop, wkc);
-// 		printf("%llu: Processdata cycle %5d , Wck %3d, DCtime %12lld, dt %12lld, O:",
+		printf("%llu: Processdata cycle %5d , Wck %3d, DCtime %12lld, dt %12lld, O:",
 // 		printf("%llu: Processdata cycle %5d , Wck %3d, DCtime %12ld, dt %12ld, O:",
-// 		      loop, dorun, wkc , ec_DCtime, gl_delta);
+		      loop, dorun, wkc , ec_DCtime, gl_delta);
 #endif
-// #ifdef PL_PRINT_OP_REQUIRED
-// 		if (slave1_microchip_lan9252)
-// 			printf(" %2.2x", *(ec_slave[0].outputs + MODULE_INDEX_LED_D24));
-// #else
-// 		for(j = 0 ; j < oloop; j++)
-// 			printf(" %2.2x", *(ec_slave[0].outputs + j));
-// #endif
-// 		printf(" I:");
-// 
-// 		if (slave1_microchip_lan9252) {
-// 			for(j = 0 ; j < 5; j++)
-// 				printf(" %2.2x", *(ec_slave[0].inputs + j));
-// 			printf(" %2.2x\n", *(ec_slave[0].inputs + 16));
-// 		} else {
-// 			for(j = 0 ; j < iloop; j++)
-// 				printf(" %2.2x", *(ec_slave[0].inputs + j));
-// 			printf("\n");
-// 		}
+#ifdef PL_PRINT_OP_REQUIRED
+		if (slave1_microchip_lan9252)
+			printf(" %2.2x", *(ec_slave[0].outputs + MODULE_INDEX_LED_D24));
+#else
+		for(j = 0 ; j < oloop; j++)
+			printf(" %2.2x", *(ec_slave[0].outputs + j));
+#endif
+		printf(" I:");
+
+		if (slave1_microchip_lan9252) {
+			for(j = 0 ; j < 5; j++)
+				printf(" %2.2x", *(ec_slave[0].inputs + j));
+			printf(" %2.2x\n", *(ec_slave[0].inputs + 16));
+		} else {
+			for(j = 0 ; j < iloop; j++)
+				printf(" %2.2x", *(ec_slave[0].inputs + j));
+			printf("\n");
+		}
 
 #ifndef PL_DC_TEST
 		printf(" T:%"PRId64"\n",ec_DCtime);
 		needlf = TRUE;
 #endif
-// 		fflush(stdout);
+		fflush(stdout);
 		osal_usleep(20000);
 	}
 #ifdef PL_DC_TEST
