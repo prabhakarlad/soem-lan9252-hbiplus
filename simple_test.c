@@ -46,6 +46,8 @@ static volatile int64 gl_delta;
 static volatile int dorun = 0;
 static volatile int deltat, tmax = 0;
 
+static boolean acylic_test = FALSE;
+
 #define EVB_HBIPLUS_MODULE_INDEX_LED_D24	0x8
 #define EVB_HBIPLUS_MODULE_INDEX_PUSH_BUTTON_D24 16
 
@@ -68,6 +70,31 @@ static void send_slavetosafeop(void)
 	printf("ec_writestate return %d\n", i);
 }
 #endif
+
+static inline void slave_digital_output(void)
+{
+	int i;
+
+	for(i = 1; i <= ec_slavecount ; i++) {
+		if (!(strcmp(ec_slave[i].name, "PIC32 EtherCAT MSP16BIT"))) {
+			static boolean led24 = FALSE;
+			boolean flip = FALSE;
+
+			if (!(dorun % 30))
+				flip = TRUE;
+
+			if (flip)
+				led24 = !led24;
+			set_output_bit(i, EVB_HBIPLUS_MODULE_INDEX_LED_D24, led24);
+		} else if (!(strcmp(ec_slave[i].name, "EasyCAT 16+16 rev 1"))) {
+			/* TODO: DO SOMETHING */
+		} else {
+			/* TODO: DO SOMETHING */
+		}
+	}
+
+
+}
 
 static void simpletest(char *ifname)
 {
@@ -177,9 +204,7 @@ static void simpletest(char *ifname)
 
 	printf("Operational state reached for all slaves.\n");
 
-	/* activate cyclic process data */
-	dorun = 1;
-
+	/* reduce number of ip/op to be printed on console */
 	if (iloop > 5)
 		iloop = 5;
 
@@ -187,29 +212,63 @@ static void simpletest(char *ifname)
 		oloop = 5;
 
 	inOP = TRUE;
-	 /* acyclic loop 100000000UL x 20ms */
-	for(loop = 1, j = 0;  loop <= 100000000UL; loop++) {
-		printf("%llu: Processdata cycle %5d , Wck %3d, DCtime %12lld, dt %12lld, O:",
-// 		printf("%llu: Processdata cycle %5d , Wck %3d, DCtime %12ld, dt %12ld, O:",
-		      loop, dorun, wkc , ec_DCtime, gl_delta);
+	/* activate cyclic process data */
+	if (acylic_test == TRUE) {
+		dorun = 1;
+		/* acyclic loop 100000000UL x 20ms */
+		for(loop = 1;  loop <= 100000000UL; loop++) {
+			printf("%llu: Processdata cycle %5d , Wck %3d, DCtime %12lld, dt %12lld, O:",
+// 			printf("%llu: Processdata cycle %5d , Wck %3d, DCtime %12ld, dt %12ld, O:",
+			loop, dorun, wkc , ec_DCtime, gl_delta);
 
-		/* only printing out led status */
-		printf(" %2.2x", *(ec_slave[0].outputs + EVB_HBIPLUS_MODULE_INDEX_LED_D24));
+			/* only printing out led status */
+			printf(" %2.2x", *(ec_slave[0].outputs + EVB_HBIPLUS_MODULE_INDEX_LED_D24));
 #if 0
-		for(j = 0 ; j < oloop; j++)
-			printf(" %2.2x", *(ec_slave[0].outputs + j));
+			for(j = 0 ; j < oloop; j++)
+				printf(" %2.2x", *(ec_slave[0].outputs + j));
 #endif
-		printf(" I:");
-		for(j = 0 ; j < iloop; j++)
-			printf(" %2.2x", *(ec_slave[0].inputs + j));
-		/* print button press for evb hbi slave */
-		 printf(" %2.2x", *(ec_slave[0].inputs + EVB_HBIPLUS_MODULE_INDEX_PUSH_BUTTON_D24));
-		printf("\n");
+			printf(" I:");
+			for(j = 0 ; j < iloop; j++)
+				printf(" %2.2x", *(ec_slave[0].inputs + j));
+			/* print button press for evb hbi slave */
+			printf(" %2.2x", *(ec_slave[0].inputs + EVB_HBIPLUS_MODULE_INDEX_PUSH_BUTTON_D24));
+			printf("\n");
 
-		fflush(stdout);
-		osal_usleep(20000);
+			fflush(stdout);
+			osal_usleep(20000);
+		}
+		dorun = 0;
+	} else {
+		/* cyclic loop 100000000UL x 20ms */
+		for(loop = 1, dorun = 0;  loop <= 100000000UL; loop++, dorun++) {
+			slave_digital_output();
+			ec_send_processdata();
+			wkc = ec_receive_processdata(EC_TIMEOUTRET);
+			if (wkc < expectedWKC) {
+				printf("wkc: %3d expectedWKC:%3d\n", wkc, expectedWKC);
+				osal_usleep(20000);
+				continue;
+			}
+			printf("%llu: Processdata cycle %5d , Wck %3d, DCtime %12lld, dt %12lld, O:",
+// 			printf("%llu: Processdata cycle %5d , Wck %3d, DCtime %12ld, dt %12ld, O:",
+			loop, dorun, wkc , ec_DCtime, gl_delta);
+
+			/* only printing out led status */
+			printf(" %2.2x", *(ec_slave[0].outputs + EVB_HBIPLUS_MODULE_INDEX_LED_D24));
+#if 0
+			for(j = 0 ; j < oloop; j++)
+				printf(" %2.2x", *(ec_slave[0].outputs + j));
+#endif
+			printf(" I:");
+			for(j = 0 ; j < iloop; j++)
+				printf(" %2.2x", *(ec_slave[0].inputs + j));
+			/* print button press for evb hbi slave */
+			printf(" %2.2x", *(ec_slave[0].inputs + EVB_HBIPLUS_MODULE_INDEX_PUSH_BUTTON_D24));
+			printf("\n");
+			osal_usleep(20000);
+		}
 	}
-	dorun = 0;
+
 	inOP = FALSE;
 
 	printf("\nRequest init state for all slaves\n");
@@ -258,31 +317,6 @@ static inline void ec_sync(int64 reftime, int64 cycletime , int64 *offsettime)
 
 	*offsettime = -(delta / 100) - (integral / 20);
 	gl_delta = delta;
-}
-
-static inline void slave_digital_output(void)
-{
-	int i;
-
-	for(i = 1; i <= ec_slavecount ; i++) {
-		if (!(strcmp(ec_slave[i].name, "PIC32 EtherCAT MSP16BIT"))) {
-			static boolean led24 = FALSE;
-			boolean flip = FALSE;
-
-			if (!(dorun % 30))
-				flip = TRUE;
-
-			if (flip)
-				led24 = !led24;
-			set_output_bit(i, EVB_HBIPLUS_MODULE_INDEX_LED_D24, led24);
-		} else if (!(strcmp(ec_slave[i].name, "EasyCAT 16+16 rev 1"))) {
-			/* TODO: DO SOMETHING */
-		} else {
-			/* TODO: DO SOMETHING */
-		}
-	}
-
-
 }
 
 /* RT EtherCAT thread */
@@ -425,7 +459,7 @@ static void inst(const int sig)
 
 int main(int argc, char *argv[])
 {
-	int ctime = 4000;
+	int ctime = 1000;
 
 	printf("SOEM (Simple Open EtherCAT Master)\nSimple test\n");
 
@@ -434,8 +468,12 @@ int main(int argc, char *argv[])
 		inst(SIGINT);
 		inst(SIGTERM);
 
-		/* create RT thread */
-		osal_thread_create_rt(&thread1, stack64k * 2, &ecatthread, (void*) &ctime);
+		if (argc > 3) {
+			acylic_test = TRUE;
+			ctime = atoi(argv[2]);
+			/* create RT thread */
+			osal_thread_create_rt(&thread1, stack64k * 2, &ecatthread, (void*) &ctime);
+		}
 		/* create thread to handle slave error handling in OP */
 		osal_thread_create(&thread1, stack64k * 2, &ecatcheck, (void*) &ctime);
 		/* start cyclic part */
