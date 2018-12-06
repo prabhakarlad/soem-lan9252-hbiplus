@@ -174,7 +174,8 @@ static void simpletest(char *ifname)
 	/* send one valid process data to make outputs in slaves happy*/
 	ec_slave[0].state = EC_STATE_OPERATIONAL;
 	ec_send_processdata();
-	ec_receive_processdata(EC_TIMEOUTRET);
+	wkc = ec_receive_processdata(EC_TIMEOUTRET);
+
 	/* request OP state for all slaves */
 	i = ec_writestate(0);
 	printf("ec_writestate return %d\n", i);
@@ -242,6 +243,7 @@ static void simpletest(char *ifname)
 		/* cyclic loop 100000000UL x 20ms */
 		for(loop = 1, dorun = 0;  loop <= 100000000UL; loop++, dorun++) {
 			slave_digital_output();
+
 			ec_send_processdata();
 			wkc = ec_receive_processdata(EC_TIMEOUTRET);
 			if (wkc < expectedWKC) {
@@ -249,9 +251,9 @@ static void simpletest(char *ifname)
 				osal_usleep(20000);
 				continue;
 			}
-			printf("%llu: Processdata cycle %5d , Wck %3d, DCtime %12lld, dt %12lld, O:",
-// 			printf("%llu: Processdata cycle %5d , Wck %3d, DCtime %12ld, dt %12ld, O:",
-			loop, dorun, wkc , ec_DCtime, gl_delta);
+			printf("%llu: Processdata cycle %5d , Wck %3d, DCtime %12lld, O:",
+// 			printf("%llu: Processdata cycle %5d , Wck %3d, DCtime %12ld, O:",
+			loop, dorun, wkc , ec_DCtime);
 
 			/* only printing out led status */
 			printf(" %2.2x", *(ec_slave[0].outputs + EVB_HBIPLUS_MODULE_INDEX_LED_D24));
@@ -468,7 +470,7 @@ int main(int argc, char *argv[])
 		inst(SIGINT);
 		inst(SIGTERM);
 
-		if (argc > 3) {
+		if (argc > 2) {
 			acylic_test = TRUE;
 			ctime = atoi(argv[2]);
 			/* create RT thread */
