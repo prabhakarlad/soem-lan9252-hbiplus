@@ -30,35 +30,44 @@
 #define NSEC_PER_SEC 1000000000
 #define EC_TIMEOUTMON 500
 
-#define PL_PRINT_IP_REQUIRED	1
-#define PL_PRINT_OP_REQUIRED	1
-#define PL_DC_TEST		1
-
 typedef void (*sighandler_t)(int);
 
 static char IOmap[4096];
 static OSAL_THREAD_HANDLE thread1;
-static volatile int expectedWKC;
+static int expectedWKC;
 static volatile boolean needlf = FALSE;
 static volatile int wkc;
 static boolean inOP = FALSE;
 static uint8 currentgroup = 0;
 static unsigned long long loop = 0;
 
-static boolean slave1_microchip_lan9252 = TRUE;
-
-#ifdef PL_DC_TEST
-static int64 toff, gl_delta;
+static int64 toff;
+static volatile int64 gl_delta;
 static volatile int dorun = 0;
 static volatile int deltat, tmax = 0;
-#endif
 
-#define MODULE_INDEX_LED_D24	8
+#define EVB_HBIPLUS_MODULE_INDEX_LED_D24	0x8
+#define EVB_HBIPLUS_MODULE_INDEX_PUSH_BUTTON_D24 16
 
 static inline void set_output_bit (uint16 slave_no, uint8 module_index, uint8 value)
 {
 	*(ec_slave[slave_no].outputs + module_index) = value;
 }
+
+#if 0
+static int potentiometer_value = 0x0;
+static int potentiometer_value_repeat = 0;
+
+static void send_slavetosafeop(void)
+{
+	int i;
+
+	/* send one valid process data to make outputs in slaves happy */
+	ec_slave[1].state = EC_STATE_SAFE_OP;
+	i = ec_writestate(1);
+	printf("ec_writestate return %d\n", i);
+}
+#endif
 
 static void simpletest(char *ifname)
 {
@@ -99,20 +108,17 @@ static void simpletest(char *ifname)
 		goto exit_simple;
 	}
 
-	 /* **PL**
-	  * void ecx_dcsync01(ecx_contextt *context, uint16 slave, boolean act,
-	  * uint32 CyclTime0, uint32 CyclTime1, int32 CyclShift)
-	  * NOTE: if CyclTime1 = 0 then SYNC1 fires a the same time as SYNC0.
-	  * 
-	  * ec_dcsync01(1, TRUE, 1000000U, 1000000U / 2, 0);
-	  */
 	for(i = 1; i <= ec_slavecount ; i++) {
-		if (!(strcmp(ec_slave[i].name, "PIC32 EtherCAT MSP16BIT"))) {
-			printf("Enabling SYNC0/1 for slave: %s.\n", ec_slave[i].name);
-			ec_dcsync01(i, TRUE, 1000000U, 0, 0);
-		} else if (!(strcmp(ec_slave[i].name, "EasyCAT 16+16 rev 1"))) {
-			printf("Enabling SYNC0/1 for slave: %s.\n", ec_slave[i].name);
-			ec_dcsync01(i, TRUE, 1000000U, 1000000U / 2, 0);
+		if (ec_slave[i].hasdc) {
+			printf("Enabling DC for slave: %s.\n", ec_slave[i].name);
+			/* more delayed */
+// 			ec_dcsync01(i, TRUE, 4000000000U, 4000000000U / 2, 100);
+			/* Works perfect */
+			ec_dcsync01(i, TRUE, 40000000U, 40000000U / 2, 100);
+			/* falls apart */
+// 			ec_dcsync01(i, TRUE, 400000U, 400000U / 2, 100);
+		} else {
+			printf("DC not supported for slave: %s.\n", ec_slave[i].name);
 		}
 	}
 
@@ -128,17 +134,10 @@ static void simpletest(char *ifname)
 	oloop = ec_slave[0].Obytes;
 	if ((oloop == 0) && (ec_slave[0].Obits > 0))
 		oloop = 1;
-#if 0
-	if (oloop > 8)
-		oloop = 8;
-#endif
 	iloop = ec_slave[0].Ibytes;
 	if ((iloop == 0) && (ec_slave[0].Ibits > 0))
 		iloop = 1;
-#if 0
-	if (iloop > 17)
-		iloop = 17;
-#endif
+
 	printf("segments : %d : %d %d %d %d\n",ec_group[0].nsegments ,ec_group[0].IOsegment[0],ec_group[0].IOsegment[1],ec_group[0].IOsegment[2],ec_group[0].IOsegment[3]);
 
 	printf("Request operational state for all slaves\n");
@@ -177,57 +176,42 @@ static void simpletest(char *ifname)
 	}
 
 	printf("Operational state reached for all slaves.\n");
-#ifdef PL_DC_TEST
+
+	/* activate cyclic process data */
 	dorun = 1;
-#endif
+
+	if (iloop > 5)
+		iloop = 5;
+
+	if (oloop > 5)
+		oloop = 5;
+
 	inOP = TRUE;
-	 /* acyclic loop 100000000UL x 5000ms  */
-	for(loop = 1;  loop <= 100000000UL; loop++) {
-#ifndef PL_DC_TEST
-		ec_send_processdata();
-		wkc = ec_receive_processdata(EC_TIMEOUTRET);
-                if (wkc < expectedWKC) {
-			osal_usleep(5000);
-			continue;
-		}
-		printf("Processdata cycle %llu, WKC %d , O:", loop, wkc);
-#else
+	 /* acyclic loop 100000000UL x 20ms */
+	for(loop = 1, j = 0;  loop <= 100000000UL; loop++) {
 		printf("%llu: Processdata cycle %5d , Wck %3d, DCtime %12lld, dt %12lld, O:",
 // 		printf("%llu: Processdata cycle %5d , Wck %3d, DCtime %12ld, dt %12ld, O:",
 		      loop, dorun, wkc , ec_DCtime, gl_delta);
-#endif
-#ifdef PL_PRINT_OP_REQUIRED
-		if (slave1_microchip_lan9252)
-			printf(" %2.2x", *(ec_slave[0].outputs + MODULE_INDEX_LED_D24));
-#else
+
+		/* only printing out led status */
+		printf(" %2.2x", *(ec_slave[0].outputs + EVB_HBIPLUS_MODULE_INDEX_LED_D24));
+#if 0
 		for(j = 0 ; j < oloop; j++)
 			printf(" %2.2x", *(ec_slave[0].outputs + j));
 #endif
 		printf(" I:");
+		for(j = 0 ; j < iloop; j++)
+			printf(" %2.2x", *(ec_slave[0].inputs + j));
+		/* print button press for evb hbi slave */
+		 printf(" %2.2x", *(ec_slave[0].inputs + EVB_HBIPLUS_MODULE_INDEX_PUSH_BUTTON_D24));
+		printf("\n");
 
-		if (slave1_microchip_lan9252) {
-			for(j = 0 ; j < 5; j++)
-				printf(" %2.2x", *(ec_slave[0].inputs + j));
-			printf(" %2.2x\n", *(ec_slave[0].inputs + 16));
-		} else {
-			for(j = 0 ; j < iloop; j++)
-				printf(" %2.2x", *(ec_slave[0].inputs + j));
-			printf("\n");
-		}
-
-#ifndef PL_DC_TEST
-		printf(" T:%"PRId64"\n",ec_DCtime);
-		needlf = TRUE;
-#endif
 		fflush(stdout);
 		osal_usleep(20000);
 	}
-#ifdef PL_DC_TEST
 	dorun = 0;
-#endif
 	inOP = FALSE;
 
-	ec_dcsync01(1, FALSE, 1000000U, 1000000U/2, 0);
 	printf("\nRequest init state for all slaves\n");
 	ec_slave[0].state = EC_STATE_INIT;
 	/* request INIT state for all slaves */
@@ -239,7 +223,6 @@ exit_simple:
         ec_close();
 }
 
-#ifdef PL_DC_TEST
 /* add ns to timespec */
 static inline void add_timespec(struct timespec *ts, int64 addtime)
 {
@@ -267,7 +250,7 @@ static inline void ec_sync(int64 reftime, int64 cycletime , int64 *offsettime)
 	delta = (reftime - 50000) % cycletime;
 	if (delta > (cycletime / 2))
 		delta= delta - cycletime;
-	
+
 	if (delta > 0)
 		integral++;
 	if (delta < 0)
@@ -291,8 +274,10 @@ static inline void slave_digital_output(void)
 
 			if (flip)
 				led24 = !led24;
-			set_output_bit(1, MODULE_INDEX_LED_D24, led24);
+			set_output_bit(i, EVB_HBIPLUS_MODULE_INDEX_LED_D24, led24);
 		} else if (!(strcmp(ec_slave[i].name, "EasyCAT 16+16 rev 1"))) {
+			/* TODO: DO SOMETHING */
+		} else {
 			/* TODO: DO SOMETHING */
 		}
 	}
@@ -322,7 +307,6 @@ static OSAL_THREAD_FUNC_RT ecatthread(void *ptr)
 		clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &ts, &tleft);
 		if (dorun > 0) {
 			wkc = ec_receive_processdata(EC_TIMEOUTRET);
-
 			dorun++;
 			slave_digital_output();
 
@@ -334,7 +318,6 @@ static OSAL_THREAD_FUNC_RT ecatthread(void *ptr)
 		}
 	}
 }
-#endif
 
 static OSAL_THREAD_FUNC ecatcheck(void *ptr)
 {
@@ -407,8 +390,18 @@ static OSAL_THREAD_FUNC ecatcheck(void *ptr)
 
 static void handler(int sig)
 {
+	int i;
+
+	dorun = 0;
+	inOP = FALSE;
+
+	for(i = 1; i <= ec_slavecount ; i++) {
+		if (ec_slave[i].hasdc) {
+			printf("Disabling DC for slave: %s.\n", ec_slave[i].name);
+			ec_dcsync01(i, FALSE, 10000, 10000 / 2, 0);
+		}
+	}
 	printf("\nhandler %d: Request init state for all slaves\n", sig);
-	ec_dcsync01(1, FALSE, 1000000U, 1000000U/2, 0);
 	ec_slave[0].state = EC_STATE_INIT;
 	/* request INIT state for all slaves */
 	ec_writestate(0);
@@ -432,7 +425,7 @@ static void inst(const int sig)
 
 int main(int argc, char *argv[])
 {
-	int ctime = 1000;
+	int ctime = 4000;
 
 	printf("SOEM (Simple Open EtherCAT Master)\nSimple test\n");
 
@@ -441,12 +434,8 @@ int main(int argc, char *argv[])
 		inst(SIGINT);
 		inst(SIGTERM);
 
-		if (argc > 2)
-			slave1_microchip_lan9252 = FALSE;
-#ifdef PL_DC_TEST
 		/* create RT thread */
 		osal_thread_create_rt(&thread1, stack64k * 2, &ecatthread, (void*) &ctime);
-#endif
 		/* create thread to handle slave error handling in OP */
 		osal_thread_create(&thread1, stack64k * 2, &ecatcheck, (void*) &ctime);
 		/* start cyclic part */
